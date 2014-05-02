@@ -1,0 +1,24 @@
+{
+  "name": "samsaara-ipc-redis",
+  "private": true,
+  "version": "0.0.0",
+  "description": "node-samsaara-ipc-redis =======================",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/arjunmehta/node-samsaara-ipc-redis.git"
+  },
+  "dependencies": {
+    "redis": "~0.10.1",
+    "hiredis": "~0.1.16"
+  },
+  "author": "Arjun Mehta",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/arjunmehta/node-samsaara-ipc-redis/issues"
+  },
+  "homepage": "https://github.com/arjunmehta/node-samsaara-ipc-redis"
+}
