@@ -19,22 +19,31 @@ var redisSub = redis.createClient(),
   var config,
       connectionController,
       communication,
+      router,
       ipc;
 
   var routes = {};
   var routeList = {};
 
 
-
-
   /**
-   * Main IPC Router
+   * Main IPC Router Internal
    */
 
   function switchMessages(channel, message){
     // console.log(config.uuid, "NEW MESSAGE ON CHANNEL", channel, message);
     routes[channel](channel, message);
   }
+
+
+
+
+
+
+
+
+  // Exported
+
 
 
 
@@ -103,36 +112,23 @@ var redisSub = redis.createClient(),
    * Router Methods (for IPC)
    */
 
-  function handleProcessMessage(channel, message){
+  function handleForwardedMessage(channel, message){
 
-    console.log(config.uuid, "###Handling process Message", channel, message);
+    console.log(config.uuid, "###Handling Forwarded Message", channel, message);
 
     var index = message.indexOf("::");
     var senderInfo = message.substring(0, index);
     var connMessage = message.slice(2+index-message.length);
 
     var senderInfoSplit = senderInfo.split(":");
-    var connID = senderInfoSplit[0];
-    var connToken = senderInfoSplit[1];
+    var connID = senderInfoSplit[senderInfoSplit.indexOf("FRM")+1];
 
-    var messageObj = JSON.parse(connMessage)[1];
+    var messageObj = JSON.parse(connMessage);
 
-    console.log("Process Message", senderInfoSplit, connID, JSON.parse(connMessage)[1]);
+    console.log("Process Message", senderInfoSplit, connID, JSON.parse(connMessage));
 
-    messageObj.sender = connID;
+    communication.executeFunction({id: connID, owner: "IPC"}, messageObj);
 
-    if(messageObj.func !== undefined){
-      communication.executeFunction({id: connID}, messageObj);
-    }
-    else if(messageObj.internal !== undefined){
-      messageObj.ns = "internal";
-      messageObj.func = messageObj.internal;
-      communication.executeFunction({id: connID}, messageObj);
-    }
-
-    // connectionController.Connection.prototype.receiveMessage.call(, JSON.parse(connMessage)[1]);
-
-    // connectionController.connections[connID].preprocessMessage(message);
   }
 
   function handleCallBackList(channel, message){    
@@ -178,6 +174,39 @@ var redisSub = redis.createClient(),
 
 
   /**
+   * Message Router
+   */
+
+  function ipcRouteMessage(connection, owner, newPrepend, message){        
+    if(owner === config.uuid){
+      router.processMessage(connection, message);
+    }
+    else{
+      newPrepend = "FRM:" + connection.id; // makePrepend("FRM", connection.id);
+      communication.sendClientMessageToProcess(owner, newPrepend + "::" + message);
+    }
+  }
+
+  function makePrepend(newPrepend){
+    var i = 1;
+    if(newPrepend === ""){
+      newPrepend += arguments[1];
+      i++;
+    }
+    for(i; i < arguments.length; i++){
+      newPrepend += ":" + arguments[i];
+    }
+    return newPrepend;
+  }
+
+
+  /**
+   * Message Filters
+   */
+
+
+
+  /**
    * Module Return Function.
    * Within this function you should set up and return your samsaara middleWare exported
    * object. Your eported object can contain:
@@ -190,28 +219,15 @@ var redisSub = redis.createClient(),
     config = samsaaraCore.config;
     connectionController = samsaaraCore.connectionController;
     communication = samsaaraCore.communication;
+    router = samsaaraCore.router;
     ipc = samsaaraCore.ipc;
 
     config.interProcess = true;
 
     communication.sendClientMessageToProcess = sendClientMessageToProcess;
 
-    addRoute("process", "PRC:"+config.uuid+":FWD", handleProcessMessage);
+    addRoute("process", "PRC:"+config.uuid+":FWD", handleForwardedMessage);
     addRoute("callBacks", "PRC:"+config.uuid+":CBL", handleCallBackList);
-
-    samsaaraCore.connectionController.Connection.prototype.routeMessage = function(message){
-      var route = message.substr(2,8);
-      // console.log(config.uuid, "MESSAGE ROUTE", route);
-      if(route === config.uuid){
-        this.preprocessMessage(message);
-      }
-      else{
-        // console.log("TRYING TO ROUTE MESSAGE TO", "PRC:"+route+":FWD:"+this.id);
-        communication.sendClientMessageToProcess(route, this.id+":"+this.token+"::"+message);
-        //this.process.token
-        //interprocess communication + authorization + modular!!!
-      }          
-    };
 
     var exported = {
 
@@ -234,7 +250,7 @@ var redisSub = redis.createClient(),
         unsubscribe: unsubscribe,   
         subscribePattern: subscribePattern,
         unsubscribePattern: unsubscribePattern,
-        routes: routes,
+        ipcRoutes: routes,
         store: redisClient
       },
 
@@ -247,7 +263,13 @@ var redisSub = redis.createClient(),
 
       connectionClose: {
         ipc: connectionClosing        
-      }
+      },
+
+      messageFilters: {
+      },
+
+      routeMessageOverride: ipcRouteMessage
+
     };
 
 
