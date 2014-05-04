@@ -25,14 +25,18 @@ var redisSub = redis.createClient(),
   var routeList = {};
 
 
+
+
   /**
    * Main IPC Router
    */
 
   function switchMessages(channel, message){
-    console.log(config.uuid, "NEW MESSAGE ON CHANNEL", channel, message)
+    // console.log(config.uuid, "NEW MESSAGE ON CHANNEL", channel, message);
     routes[channel](channel, message);
   }
+
+
 
 
   /**
@@ -54,9 +58,18 @@ var redisSub = redis.createClient(),
     publish(routes[routeList[routeName]], message);
   }
 
-  function sendCallBackList(process, callBackID, callBackList){
-    publish("PRC:"+processID+":CB", callBackID+":"+callBackList);
+  function sendCallBackList(processID, callBackID, callBackList){
+
+    // console.log("ipcRedis", config.uuid, "SENDING CALLBACK LIST ", processID, callBackID, callBackList);
+
+    publish("PRC:"+processID+":CBL", callBackID+callBackList);
   }
+
+  function sendCallBackExecute(process, callBackID, message){
+    publish("PRC:"+processID+":CBX", callBackID+":"+callBackList);
+  }
+
+
 
 
   /**
@@ -84,32 +97,56 @@ var redisSub = redis.createClient(),
   }
 
 
+
+
   /**
    * Router Methods (for IPC)
    */
 
   function handleProcessMessage(channel, message){
+
+    console.log(config.uuid, "###Handling process Message", channel, message);
+
     var index = message.indexOf("::");
-    var senderInfo = message.substr(0, index);
+    var senderInfo = message.substring(0, index);
     var connMessage = message.slice(2+index-message.length);
 
     var senderInfoSplit = senderInfo.split(":");
     var connID = senderInfoSplit[0];
     var connToken = senderInfoSplit[1];
 
-    connectionController.connections[connID].preprocessMessage(message);
+    var messageObj = JSON.parse(connMessage)[1];
+
+    console.log("Process Message", senderInfoSplit, connID, JSON.parse(connMessage)[1]);
+
+    messageObj.sender = connID;
+
+    if(messageObj.func !== undefined){
+      communication.executeFunction({id: connID}, messageObj);
+    }
+    else if(messageObj.internal !== undefined){
+      messageObj.ns = "internal";
+      messageObj.func = messageObj.internal;
+      communication.executeFunction({id: connID}, messageObj);
+    }
+
+    // connectionController.Connection.prototype.receiveMessage.call(, JSON.parse(connMessage)[1]);
+
+    // connectionController.connections[connID].preprocessMessage(message);
   }
 
-  function handleCallBackList(channel, message){
+  function handleCallBackList(channel, message){    
+
     var callBackListSplit = message.split(":");
-    var connectionsArray =  message.split(":");
-    connectionsArray.pop();
-    // console.log("ADDING CALL BACK CONNECTIONS", callBackID, connectionsArray);
-    communication.incomingCallBacks[callBackID].addConnections(connectionsArray);
+    var callBackID = callBackListSplit.shift();
+
+    // console.log("ADDING CALL BACK CONNECTIONS", callBackID, callBackListSplit, communication.incomingCallBacks);
+    
+    communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
   }
 
   function sendClientMessageToProcess(processID, message){
-    console.log("Publishing to", "PRC:"+processID+":FWD" );
+    // console.log("Publishing to", "PRC:"+processID+":FWD". message );
     publish("PRC:"+processID+":FWD", message);
   }
 
@@ -128,6 +165,7 @@ var redisSub = redis.createClient(),
   function connectionInitialzation(opts, connection, attributes){
     console.log("Initializing IPC Subscription!!!", opts.groups, connection.id);
     redisSub.subscribe("NTV:"+connection.id+":MSG");
+    redisClient.incr("totalCurrentCount");
     attributes.initialized(null, "ipc");
   }
 
@@ -135,6 +173,7 @@ var redisSub = redis.createClient(),
   function connectionClosing(connection){
     var connID = connection.id;
     redisSub.unsubscribe("NTV"+connID+":MSG");
+    redisClient.decr("totalCurrentCount");
   }
 
 
@@ -153,20 +192,24 @@ var redisSub = redis.createClient(),
     communication = samsaaraCore.communication;
     ipc = samsaaraCore.ipc;
 
+    config.interProcess = true;
+
     communication.sendClientMessageToProcess = sendClientMessageToProcess;
 
     addRoute("process", "PRC:"+config.uuid+":FWD", handleProcessMessage);
-    addRoute("callBacks", "PRC:"+config.uuid+":CB", handleCallBackList);
+    addRoute("callBacks", "PRC:"+config.uuid+":CBL", handleCallBackList);
 
-    samsaaraCore.Connection.prototype.routeMessage = function(message){
+    samsaaraCore.connectionController.Connection.prototype.routeMessage = function(message){
       var route = message.substr(2,8);
       // console.log(config.uuid, "MESSAGE ROUTE", route);
       if(route === config.uuid){
         this.preprocessMessage(message);
       }
       else{
-        console.log("TRYING TO ROUTE MESSAGE TO", "PRC:"+route+":RCV:"+this.id);
+        // console.log("TRYING TO ROUTE MESSAGE TO", "PRC:"+route+":FWD:"+this.id);
         communication.sendClientMessageToProcess(route, this.id+":"+this.token+"::"+message);
+        //this.process.token
+        //interprocess communication + authorization + modular!!!
       }          
     };
 
