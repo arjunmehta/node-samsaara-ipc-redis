@@ -1,6 +1,6 @@
 /*!
  * Samsaara Inter Process Communication (Redis) Module
- * Copyright(c) 2013 Arjun Mehta <arjun@newlief.com>
+ * Copyright(c) 2014 Arjun Mehta <arjun@newlief.com>
  * MIT Licensed
  */
 
@@ -34,17 +34,6 @@ var redisSub = redis.createClient(),
     // console.log(config.uuid, "NEW MESSAGE ON CHANNEL", channel, message);
     routes[channel](channel, message);
   }
-
-
-
-
-
-
-
-
-  // Exported
-
-
 
 
 
