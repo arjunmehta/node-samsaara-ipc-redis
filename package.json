@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "description": "node-samsaara-ipc-redis =======================",
   "main": "main.js",
+  "dependencies": {
+    "debug" : "~0.8.1"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -4,13 +4,16 @@
  * MIT Licensed
  */
 
+var debug = require('debug')('samsaara:ipcRedis');
+var debugMessaging = require('debug')('samsaara:ipcRedis:messaging');
+
 var redis = require('redis');
 
 function ipcRedis(options){
 
-var redisSub = redis.createClient(),
-    redisPub = redis.createClient(),
-    redisClient = redis.createClient();
+  var redisSub = redis.createClient(),
+      redisPub = redis.createClient(),
+      redisClient = redis.createClient();
 
   redisSub.on("message", function (channel, message) {
     switchMessages(channel, message);
@@ -22,8 +25,8 @@ var redisSub = redis.createClient(),
       router,
       ipc;
 
-  var routes = {};
-  var routeList = {};
+  var routes = {},
+      routeList = {};
 
 
   /**
@@ -31,7 +34,7 @@ var redisSub = redis.createClient(),
    */
 
   function switchMessages(channel, message){
-    // console.log(config.uuid, "NEW MESSAGE ON CHANNEL", channel, message);
+    debugMessaging("New Message On Channel", config.uuid, channel, message);
     routes[channel](channel, message);
   }
 
@@ -58,7 +61,7 @@ var redisSub = redis.createClient(),
 
   function sendCallBackList(processID, callBackID, callBackList){
 
-    // console.log("ipcRedis", config.uuid, "SENDING CALLBACK LIST ", processID, callBackID, callBackList);
+    // debug("ipcRedis", config.uuid, "SENDING CALLBACK LIST ", processID, callBackID, callBackList);
 
     publish("PRC:"+processID+":CBL", callBackID+callBackList);
   }
@@ -103,7 +106,7 @@ var redisSub = redis.createClient(),
 
   function handleForwardedMessage(channel, message){
 
-    console.log(config.uuid, "###Handling Forwarded Message", channel, message);
+    debug("Handle Forwarded Message", config.uuid, channel, message);
 
     var index = message.indexOf("::");
     var senderInfo = message.substring(0, index);
@@ -114,7 +117,7 @@ var redisSub = redis.createClient(),
 
     var messageObj = JSON.parse(connMessage);
 
-    console.log("Process Message", senderInfoSplit, connID, JSON.parse(connMessage));
+    debug("Process Message", config.uuid, senderInfoSplit, connID, JSON.parse(connMessage));
 
     communication.executeFunction({id: connID, owner: "IPC"}, messageObj);
 
@@ -125,13 +128,13 @@ var redisSub = redis.createClient(),
     var callBackListSplit = message.split(":");
     var callBackID = callBackListSplit.shift();
 
-    // console.log("ADDING CALL BACK CONNECTIONS", callBackID, callBackListSplit, communication.incomingCallBacks);
+    // debug("ADDING CALL BACK CONNECTIONS", callBackID, callBackListSplit, communication.incomingCallBacks);
     
     communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
   }
 
   function sendClientMessageToProcess(processID, message){
-    // console.log("Publishing to", "PRC:"+processID+":FWD". message );
+    // debug("Publishing to", "PRC:"+processID+":FWD". message );
     publish("PRC:"+processID+":FWD", message);
   }
 
@@ -148,7 +151,7 @@ var redisSub = redis.createClient(),
    */
 
   function connectionInitialzation(opts, connection, attributes){
-    console.log("Initializing IPC Subscription!!!", opts.groups, connection.id);
+    debug("Initializing IPC Subscription!!!", config.uuid, opts.groups, connection.id);
     redisSub.subscribe("NTV:"+connection.id+":MSG");
     redisClient.incr("totalCurrentCount");
     attributes.initialized(null, "ipc");
@@ -204,7 +207,7 @@ var redisSub = redis.createClient(),
 
   return function ipcRedis(samsaaraCore){
 
-    // console.log(samsaaraCore,);
+    // debug(samsaaraCore,);
     config = samsaaraCore.config;
     connectionController = samsaaraCore.connectionController;
     communication = samsaaraCore.communication;
@@ -262,7 +265,7 @@ var redisSub = redis.createClient(),
     };
 
 
-    // console.log("Returning exported", exported);
+    // debug("Returning exported", exported);
     return exported;
 
   };
