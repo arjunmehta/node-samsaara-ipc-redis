@@ -4,9 +4,6 @@
   "version": "0.0.0",
   "description": "node-samsaara-ipc-redis =======================",
   "main": "main.js",
-  "dependencies": {
-    "debug" : "~0.8.1"
-  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -15,6 +12,7 @@
     "url": "git://github.com/arjunmehta/node-samsaara-ipc-redis.git"
   },
   "dependencies": {
+    "debug" : "~0.8.1",
     "redis": "~0.10.1",
     "hiredis": "~0.1.16"
   },
