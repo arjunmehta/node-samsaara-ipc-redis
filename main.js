@@ -25,9 +25,11 @@ function ipcRedis(options){
       router,
       ipc;
 
-  var routes = {},
-      routeList = {};
+  var symbolic = require('./symbolic');
+  var SymbolicConnection = symbolic.SymbolicConnection;
 
+  var routes = {},
+      routeList = {};   
 
   /**
    * Main IPC Router Internal
@@ -37,7 +39,6 @@ function ipcRedis(options){
     debugMessaging("New Message On Channel", config.uuid, channel, message);
     routes[channel](channel, message);
   }
-
 
 
   /**
@@ -104,6 +105,9 @@ function ipcRedis(options){
    * Router Methods (for IPC)
    */
 
+
+  // incoming messages/objects
+
   function handleForwardedMessage(channel, message){
 
     debug("Handle Forwarded Message", config.uuid, channel, message);
@@ -119,7 +123,7 @@ function ipcRedis(options){
 
     debug("Process Message", config.uuid, senderInfoSplit, connID, JSON.parse(connMessage));
 
-    communication.executeFunction({id: connID, owner: "IPC"}, messageObj);
+    communication.executeFunction({ connection: {id: connID, owner: "IPC"} }, messageObj);
 
   }
 
@@ -133,11 +137,25 @@ function ipcRedis(options){
     communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
   }
 
+  function handleSymbolicConnection(channel, message){    
+
+    var symbolicData = jsonParse(message);
+    var symbolicConnection = connections[symbolicData.nativeID] = new SymbolicConnection(symbolicData);    
+    communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
+  }
+
+
+  // outgoing messages/objects
+
   function sendClientMessageToProcess(processID, message){
     // debug("Publishing to", "PRC:"+processID+":FWD". message );
     publish("PRC:"+processID+":FWD", message);
   }
 
+  function createSymbolic(connection, host, options){
+    var symbolic = {};
+    publish("PRC:"+host+":SYM", symbolic);
+  }
 
 
 
@@ -214,12 +232,15 @@ function ipcRedis(options){
     router = samsaaraCore.router;
     ipc = samsaaraCore.ipc;
 
+    symbolic.initialize(samsaaraCore);
+
     config.interProcess = true;
 
     communication.sendClientMessageToProcess = sendClientMessageToProcess;
 
     addRoute("process", "PRC:"+config.uuid+":FWD", handleForwardedMessage);
     addRoute("callBacks", "PRC:"+config.uuid+":CBL", handleCallBackList);
+    addRoute("newSymbolicConnection", "PRC:"+config.uuid+":SYM", handleSymbolicConnection);
 
     var exported = {
 
@@ -273,3 +294,17 @@ function ipcRedis(options){
 }
 
 module.exports = exports = ipcRedis;
+
+
+function parseJSON(jsonString){
+  var parsed;
+
+  try{
+    parsed = JSON.parse(jsonString);      
+  }
+  catch(e){
+    debug("Message Error: Invalid JSON", jsonString, e);
+  }
+
+  return parsed;
+}
