@@ -11,6 +11,20 @@ var redis = require('redis');
 
 function ipcRedis(options){
 
+
+  var config,
+      connectionController,
+      communication,
+      router,
+      ipc,
+      connections;
+
+  var symbolic = require('./symbolic');
+  var SymbolicConnection = symbolic.SymbolicConnection;
+
+  var routes = {},
+      routeList = {};         
+
   var redisSub = redis.createClient(),
       redisPub = redis.createClient(),
       redisClient = redis.createClient();
@@ -19,17 +33,7 @@ function ipcRedis(options){
     switchMessages(channel, message);
   });
 
-  var config,
-      connectionController,
-      communication,
-      router,
-      ipc;
 
-  var symbolic = require('./symbolic');
-  var SymbolicConnection = symbolic.SymbolicConnection;
-
-  var routes = {},
-      routeList = {};   
 
   /**
    * Main IPC Router Internal
@@ -52,6 +56,7 @@ function ipcRedis(options){
   }
 
   function removeRoute(routeName){
+    unsubscribe(routeList[routeName]);
     delete routes[routeList[routeName]];
     delete routeList[routeName];
   }
@@ -60,18 +65,6 @@ function ipcRedis(options){
     publish(routes[routeList[routeName]], message);
   }
 
-  function sendCallBackList(processID, callBackID, callBackList){
-
-    // debug("ipcRedis", config.uuid, "SENDING CALLBACK LIST ", processID, callBackID, callBackList);
-
-    publish("PRC:"+processID+":CBL", callBackID+callBackList);
-  }
-
-  function sendCallBackExecute(process, callBackID, message){
-    publish("PRC:"+processID+":CBX", callBackID+":"+callBackList);
-  }
-
-
 
 
   /**
@@ -79,6 +72,7 @@ function ipcRedis(options){
    */
 
   function publish(channel, message){
+    debug("PUBLISH", channel, message);
     redisPub.publish(channel, message); 
   }
 
@@ -108,7 +102,16 @@ function ipcRedis(options){
 
   // incoming messages/objects
 
+  /* 
+   * This method is executed when a message from a connection is forwarded from another process
+   * to this process, usually in response to a callback request that was sent from this process
+   * to connections on other processes.
+   */
+
   function handleForwardedMessage(channel, message){
+
+    // channel here is a STRING in the form: "PRC:ProcessUUID:FWD"
+    // message here is a STRING of the form: "FRM:connectionID::{samsaaraJSONFunctionCall}"
 
     debug("Handle Forwarded Message", config.uuid, channel, message);
 
@@ -119,15 +122,19 @@ function ipcRedis(options){
     var senderInfoSplit = senderInfo.split(":");
     var connID = senderInfoSplit[senderInfoSplit.indexOf("FRM")+1];
 
-    var messageObj = JSON.parse(connMessage);
+    var messageObj = parseJSON(connMessage);
 
-    debug("Process Message", config.uuid, senderInfoSplit, connID, JSON.parse(connMessage));
+    debug("Process Message", config.uuid, senderInfoSplit, connID, messageObj);
 
-    communication.executeFunction({ connection: {id: connID, owner: "IPC"} }, messageObj);
-
+    if(messageObj !== undefined){
+      communication.executeFunction({ connection: connections[connID] || {id: connID} }, messageObj);
+    }
   }
 
-  function handleCallBackList(channel, message){    
+  function handleCallBackList(channel, message){   
+
+    // channel here is a STRING in the form: "PRC:ProcessUUID:CBL"
+    // message here is a STRING of the form: "callBackID:connectionID:connectionID:..:connectionID"
 
     var callBackListSplit = message.split(":");
     var callBackID = callBackListSplit.shift();
@@ -137,24 +144,90 @@ function ipcRedis(options){
     communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
   }
 
-  function handleSymbolicConnection(channel, message){    
+  function handleNewSymbolicConnection(channel, message){    
 
-    var symbolicData = jsonParse(message);
-    var symbolicConnection = connections[symbolicData.nativeID] = new SymbolicConnection(symbolicData);    
-    communication.incomingCallBacks[callBackID].addConnections(callBackListSplit || []);
+    // channel here is a STRING in the form: "PRC:ProcessUUID:SYMNEW"
+    // message here is a STRING of the form: {SymbolicData}
+
+    var symbolicData = parseJSON(message);
+    var symbolicConnID = symbolicData.nativeID;
+
+    connections[symbolicConnID] = new SymbolicConnection(symbolicData);    
+
+    addRoute("symMsg"+symbolicConnID, "SYM:"+symbolicConnID+":MSG", handleSymbolicMessage);
+    addRoute("symDel"+symbolicConnID, "SYM:"+symbolicConnID+":DEL", handleDeleteSymbolicConnection);
+
+  }
+
+
+  function handleSymbolicMessage(channel, message){
+
+    // channel here is a STRING in the form: "SYM:symbolicConnID:MSG"
+    // message here is a STRING of the form: "{samsaaraJSONFunctionCall}"
+
+    var symbolicConnID = channel.split(":")[1];
+    if(connections[symbolicConnID] !== undefined){
+      communication.executeFunction({connection: connections[symbolicConnID] || {id: symbolicConnID} });
+    }
+  }
+
+  function handleDeleteSymbolicConnection(channel, message){
+
+    // channel here is a STRING in the form: "SYM:symbolicConnID:DEL"
+    // message here is a STRING of the form: ""
+
+    var symbolicConnID = channel.split(":")[1];
+
+    if(connections[symbolicConnID] !== undefined){
+      delete connections[symbolicConnID];
+    }
+
+    removeRoute("symMsg"+symbolicConnID);
+    removeRoute("symDel"+symbolicConnID);
+  }
+
+  function handleMessageToNativeConnection(channel, message){
+
+    // !! need to test this, individual subscriptions to native messages, vs a single router.
+
+    // channel here is a STRING in the form: "NTV:connID:MSG"
+    // message here is a STRING of the form: "{samsaaraJSONFunctionCall}"
+
+    var connID = channel.split(":")[1];
+
+    if(connections[connID] !== undefined){
+      connections[connID].write(message);
+    }
   }
 
 
   // outgoing messages/objects
 
-  function sendClientMessageToProcess(processID, message){
+  function sendClientMessageToProcess(processID, connID, message){
     // debug("Publishing to", "PRC:"+processID+":FWD". message );
-    publish("PRC:"+processID+":FWD", message);
+    publish("PRC:"+processID+":FWD", "FRM:"+connID+"::"+message);
   }
 
-  function createSymbolic(connection, host, options){
-    var symbolic = {};
-    publish("PRC:"+host+":SYM", symbolic);
+  function createSymbolicOnHost(connection, host, options){
+
+    connection.symbolicOwners[host] = true;
+
+    var symbolicData = {
+      nativeID: connection.id,
+      connectionData: connection.connectionData,
+      owner: config.uuid
+    };
+
+    publish("PRC:"+host+":SYMNEW", JSON.stringify(symbolicData) );
+  }
+
+  function sendCallBackList(processID, callBackID, callBackList){
+    // debug("ipcRedis", config.uuid, "SENDING CALLBACK LIST ", processID, callBackID, callBackList);
+    publish("PRC:"+processID+":CBL", callBackID+callBackList);
+  }
+
+  function sendCallBackExecute(processID, callBackID, message){
+    publish("PRC:"+processID+":CBX", callBackID+":"+callBackList);
   }
 
 
@@ -169,17 +242,21 @@ function ipcRedis(options){
    */
 
   function connectionInitialzation(opts, connection, attributes){
+
     debug("Initializing IPC Subscription!!!", config.uuid, opts.groups, connection.id);
-    redisSub.subscribe("NTV:"+connection.id+":MSG");
-    redisClient.incr("totalCurrentCount");
+
+    connection.symbolicOwners = {};    
+    redisClient.incr("totalCurrentCount");        
+    addRoute("ntvMsg"+connection.id, "NTV:"+connection.id+":MSG", handleMessageToNativeConnection);
+
     attributes.initialized(null, "ipc");
   }
 
 
   function connectionClosing(connection){
-    var connID = connection.id;
-    redisSub.unsubscribe("NTV"+connID+":MSG");
     redisClient.decr("totalCurrentCount");
+    publish("SYM:" + connection.id + ":DEL", "");
+    removeRoute("ntvMsg"+connection.id);
   }
 
 
@@ -187,26 +264,25 @@ function ipcRedis(options){
    * Message Router
    */
 
-  function ipcRouteMessage(connection, owner, newPrepend, message){        
+  function ipcRouteMessage(connection, owner, newHeader, message){        
     if(owner === config.uuid){
       router.processMessage(connection, message);
     }
-    else{
-      newPrepend = "FRM:" + connection.id; // makePrepend("FRM", connection.id);
-      communication.sendClientMessageToProcess(owner, newPrepend + "::" + message);
+    else{       
+      sendClientMessageToProcess(owner, connection.id, message);
     }
   }
 
-  function makePrepend(newPrepend){
+  function makeHeader(newHeader){
     var i = 1;
-    if(newPrepend === ""){
-      newPrepend += arguments[1];
+    if(newHeader === ""){
+      newHeader += arguments[1];
       i++;
     }
     for(i; i < arguments.length; i++){
-      newPrepend += ":" + arguments[i];
+      newHeader += ":" + arguments[i];
     }
-    return newPrepend;
+    return newHeader;
   }
 
 
@@ -231,25 +307,33 @@ function ipcRedis(options){
     communication = samsaaraCore.communication;
     router = samsaaraCore.router;
     ipc = samsaaraCore.ipc;
+    connections = connectionController.connections;
 
     symbolic.initialize(samsaaraCore);
 
     config.interProcess = true;
 
-    communication.sendClientMessageToProcess = sendClientMessageToProcess;
-
+    // handles messages that are redirected to this process
     addRoute("process", "PRC:"+config.uuid+":FWD", handleForwardedMessage);
-    addRoute("callBacks", "PRC:"+config.uuid+":CBL", handleCallBackList);
-    addRoute("newSymbolicConnection", "PRC:"+config.uuid+":SYM", handleSymbolicConnection);
+
+    // handles a list of connections that we are expecting a callback from
+    addRoute("callBackList", "PRC:"+config.uuid+":CBL", handleCallBackList);
+
+    // creates a new symbolic connection
+    addRoute("addSymbolicConnection", "PRC:"+config.uuid+":SYMNEW", handleNewSymbolicConnection);
+
+    // creates a new symbolic connection
+    addRoute("deleteSymbolicConnection", "PRC:"+config.uuid+":SYMDEL", handleDeleteSymbolicConnection);
 
     var exported = {
 
-      name: "ipcRedis",
+      name: "ipc",
 
       samsaaraCoreMethods: {
         addIPCRoute: addRoute,
         removeIPCRoute: removeRoute,
         publishToIPCRoute: publishToRoute,
+        createSymbolicOnHost: createSymbolicOnHost,
         store: redisClient
       },
 
@@ -257,6 +341,7 @@ function ipcRedis(options){
         addRoute: addRoute,
         removeRoute: removeRoute,
         publishToRoute: publishToRoute,
+        createSymbolicOnHost: createSymbolicOnHost,
         sendCallBackList: sendCallBackList,
         publish: publish,
         subscribe: subscribe,

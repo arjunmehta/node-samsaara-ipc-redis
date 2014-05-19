@@ -9,7 +9,7 @@ var debug = require('debug')('samsaara:ipcRedis:symbolic');
 
 var samsaara,
     ipc;
-    
+
 
 function initialize(samsaaraCore){
   samsaara = samsaaraCore;
@@ -26,7 +26,7 @@ function SymbolicConnection(symbolicData){
 
 SymbolicConnection.prototype.write = function(message){
   debug(process.pid.toString(), "SYMBOLIC write on", "SYMBOLIC CONNECTION PUBLISHING: Owner:", this.owner, this.nativeID);
-  ipc.publish("NTV:"+this.nativeID, message);
+  ipc.publish("NTV:"+this.nativeID+":MSG", message);
 };
 
 SymbolicConnection.prototype.updateDataAttribute = function(attributeName, value) {
