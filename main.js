@@ -31,17 +31,6 @@ function ipcRedis(options){
       redisPub = redis.createClient(),
       redisClient = redis.createClient();
 
-  redisSub.on("message", function (channel, message) {
-    debugMessaging("New IPC Message", channel, message);
-    switchMessages(channel, message);
-  });
-
-
-  // retrieves a peer process instance.
-
-  function process(processUuid){
-    return processes[processUuid];
-  }
 
 
   // Foundation Methods
@@ -87,11 +76,16 @@ function ipcRedis(options){
   }
 
 
-
   // 
   // Route Methods (for IPC)
   // messaging/routing. might need to split this off into its own submodule
   // 
+
+  redisSub.on("message", function (channel, message) {
+    debugMessaging("New IPC Message", channel, message);
+    switchMessages(channel, message);
+  });
+
 
   // The use of "headers" should be documented. Basically, headers should be used when forwarding messages
   // to prevent the need to prematurely parse JSON strings, only to have to repackage the JSON object again
@@ -115,28 +109,24 @@ function ipcRedis(options){
   function handleNewProcess(channel, peerUuid){
     debugProcesses("New Process", peerUuid);
     processes[peerUuid] = new Process(peerUuid);
-
-    // var testMessage = core.uuid + " to " + peerUuid + " sent";
-    // debugProcesses("Testing Process-Process Communication", testMessage);
-
-    // process(peerUuid).execute("testInterprocess", testMessage, function(message){
-    //   debugProcessCallBacks("Testing Process-Process CallBack", testMessage, "CallBack:", message);
-    // });
   }
 
-  // function testInterprocess(message, callBack){
-  //   debugProcesses("Testing Process-Process Communication", "Received and Executed testInterprocess", message, this.id);
-  //   if(typeof callBack === "function") callBack(core.uuid + " to " + this.id + " sent");
-  // }
 
   function handleDeadProcess(channel, peerUuid){    
     delete processes[peerUuid];
   }
 
+  // EXPOSED to ipc module retrieves a peer process instance.
+  // ie. ipc.process(processID).execute()...
+
+  function process(processUuid){
+    return processes[processUuid];
+  }
+
 
   // This method is executed when a message from a connection is forwarded from another process
   // to this process, usually in response to a callback request that was sent from this process
-  // to connections on other processes.
+  // to connections on other processes, we may create a separate thing for callBacks though.
   // 
   // channel here is a STRING in the form: "PRC:ProcessUUID:FWD"
   // message here is a STRING of the form: "FRM:connectionID::{samsaaraJSONFunctionCall}"
@@ -157,8 +147,14 @@ function ipcRedis(options){
     debug("Process Message", core.uuid, headerSplit, connID, messageObj);
 
     if(messageObj !== undefined){
-      communication.executeFunction({ connection: connections[connID] || {id: connID} }, messageObj);
+      communication.executeFunction({ connection: connections[connID] || {connection: {id: connID}} }, messageObj);
     }
+  }
+
+  function splitHeaderMessage(rawmessage){
+    var index = rawmessage.indexOf("::");
+    var header = rawmessage.substring(0, index);
+    return [header.split(":"), rawmessage.slice(2+index-rawmessage.length)];
   }
 
 
@@ -179,10 +175,52 @@ function ipcRedis(options){
   }
 
 
+
+  //
+  // SYMBOLIC CONNECTION
+  //
+
+  // generates a symbolic connection of the connection ID. Contacts connection owner
+  // and gets connectionData needed to build a *decent* representation of the connection locally.
+
+  function generateSymbolic(connID, callBack){
+
+    redisClient.hget("samsaara:connectionOwners", connID, function (err, ownerID){
+      if(err){
+        if(typeof callBack === "function") callBack(err, null);
+      }
+      else{
+        process(ownerID).execute("requestSymbolicData", connID, core.uuid, function (err, symbolicConnectionData){
+          if(err){
+            if(typeof callBack === "function") callBack(err, null);
+          }
+          else{
+            connections[connID] = new SymbolicConnection(ownerID, connID, symbolicConnectionData);
+            if(typeof callBack === "function") callBack(err, symbolicConnection);
+          }          
+        });
+      }
+    });
+  }
+
+
+  // InterProcess exposed methods (methods other processes can execute on this process) (in namespace["interprocess"])
+
+  function requestSymbolicData(connID, processID, callBack){
+    if(connections[connID]){
+      connections[connID].symbolicOwners[processID] = true;
+      if(typeof callBack === "function") callBack(null, connections[connID].connectionData);
+    }
+    else{
+      if(typeof callBack === "function") callBack(new Error("Connection:" + connID + " Does not exist on process:"+core.uuid), null);
+    }
+  }
+
+
   // Adds a new "symbolic connection" to this process.
   //
   // channel here is a STRING in the form: "PRC:ProcessUUID:SYMNEW"
-  // message here is a STRING of the form: {SymbolicData}
+  // message here is a STRING of the form: "{SymbolicData}"
 
   function handleNewSymbolicConnection(channel, message){    
 
@@ -192,6 +230,16 @@ function ipcRedis(options){
 
   }
 
+
+  // channel here is a STRING in the form: "PRC:processID:SYMDEL"
+  // message here is a STRING of the form: "connectionID"
+
+  function handleDeleteSymbolicConnection(channel, connID){
+
+    if(connections[connID] !== undefined){
+      delete connections[connID];
+    }
+  }
 
   // executes a method call from another process on this process. Taps into the core communication function execution method
   // with a custom callBackGenerator.
@@ -210,6 +258,11 @@ function ipcRedis(options){
     communication.executeFunction(executor, messageObj, createIPCCallBack);
   }
 
+
+
+  //
+  // CALLBACKS
+  // 
 
   // channel here is a STRING in the form: "PRC:processUUID:IPCCB"
   // message here is a STRING of the form: {owner: processUuid, func: functionName, ns: "interprocess", args: argsArray, callBack: callBackID}
@@ -249,8 +302,9 @@ function ipcRedis(options){
   }
 
 
-
-
+  //
+  // CONNECTION MESSAGES
+  // 
 
   // symbolic connection handlers
 
@@ -265,30 +319,14 @@ function ipcRedis(options){
     }
   }
 
-  function handleDeleteSymbolicConnection(channel, message){
 
-    // channel here is a STRING in the form: "SYM:symbolicConnID:DEL"
-    // message here is a STRING of the form: ""
-
-    var symbolicConnID = channel.split(":")[1];
-
-    if(connections[symbolicConnID] !== undefined){
-      delete connections[symbolicConnID];
-    }
-
-    removeRoute("symMsg"+symbolicConnID);
-    removeRoute("symDel"+symbolicConnID);
-  }
-
-
-  // native connection message handlers
+  // native connection message handlers  
+  // channel here is a STRING in the form: "NTV:connID:MSG"
+  // message here is a STRING of the form: "{samsaaraJSONFunctionCall}"
 
   function handleMessageToNativeConnection(channel, message){
 
     // !! need to test this, individual subscriptions to native connections, vs. this single router?
-
-    // channel here is a STRING in the form: "NTV:connID:MSG"
-    // message here is a STRING of the form: "{samsaaraJSONFunctionCall}"
 
     var connID = channel.split(":")[1];
 
@@ -299,59 +337,44 @@ function ipcRedis(options){
 
 
 
-
-  // outgoing messages/objects
-
-  function sendClientMessageToProcess(processID, connID, message){
-    // debug("Publishing to", "PRC:"+processID+":FWD". message );
-    publish("PRC:"+processID+":FWD", "FRM:"+connID+"::"+message);
-  }
-
-  function createSymbolicOnHost(connection, host, options){
-
-    connection.symbolicOwners[host] = true;
-
-    var symbolicData = {
-      nativeID: connection.id,
-      connectionData: connection.connectionData,
-      owner: core.uuid
-    };
-
-    publish("PRC:"+host+":SYMNEW", JSON.stringify(symbolicData) );
-  }
-
-
-  // 
-  // Connection Initialization Methods
-  // Called for every new connection
-  // 
-  // @opts: {Object} contains the connection's options
-  // @connection: {SamsaaraConnection} the connection that is initializing
-  // @attributes: {Attributes} The attributes of the SamsaaraConnection and its methods
-  // 
+  // Connection Initialization/Close Methods
+  // Called for all new connections
 
   function connectionInitialzation(opts, connection, attributes){
 
     debug("Initializing IPC Subscription!!!", core.uuid, opts.groups, connection.id);
 
-    connection.symbolicOwners = {};    
+    connection.symbolicOwners = {};
+
     redisClient.incr("totalCurrentCount");        
+
     addRoute("ntvMsg"+connection.id, "NTV:"+connection.id+":MSG", handleMessageToNativeConnection);
 
-    attributes.initialized(null, "ipc");
+    redisClient.hset("samsaara:connectionOwners", connection.id, core.uuid, function (err, reply){
+      attributes.initialized(null, "ipc");
+    });    
   }
 
 
   function connectionClosing(connection){
+
+    var connID = connection.id;
+
     redisClient.decr("totalCurrentCount");
-    publish("SYM:" + connection.id + ":DEL", "");
-    removeRoute("ntvMsg"+connection.id);
+
+    for(var owner in connection.symbolicOwners){
+      ipc.publish("PRC:"+owner+":SYMDEL", connID);
+    }
+
+    removeRoute("ntvMsg"+connID);
+
+    redisClient.hdel("samsaara:connectionOwners", connID, function (err, reply){
+
+    });
   }
 
 
-  // 
-  // Message Router
-  // 
+  // Message Router: Overwrites the core routeMessage method in the samsaara router
 
   function ipcRouteMessage(connection, owner, newHeader, message){        
     if(owner === core.uuid){
@@ -361,6 +384,17 @@ function ipcRedis(options){
       sendClientMessageToProcess(owner, connection.id, message);
     }
   }
+
+  // outgoing messages/objects
+
+  function sendClientMessageToProcess(processID, connID, message){
+    // debug("Publishing to", "PRC:"+processID+":FWD". message );
+    publish("PRC:"+processID+":FWD", "FRM:"+connID+"::"+message);
+  }
+
+
+
+  // helper method to generate a header
 
   function makeHeader(newHeader){
     var i = 1;
@@ -374,6 +408,8 @@ function ipcRedis(options){
     return newHeader;
   }
 
+
+  // ensure that the uuid for this process is unique in the entire system, if not, generate a new one and repeat
 
   function ensureUniqueCoreUuid(uuid, callBack){
     redisClient.hsetnx("samsaara:processes", uuid, "node", function (err, reply){
@@ -411,9 +447,11 @@ function ipcRedis(options){
     SymbolicConnection = require('./symbolic').initialize(samsaaraCore);
     Process = require('./process').initialize(samsaaraCore, processes, publish);
 
-    // core.samsaara.createNamespace("interprocess", {
-    //   testInterprocess: testInterprocess
-    // });
+
+    core.samsaara.createNamespace("interprocess", {
+      requestSymbolicData: requestSymbolicData
+    });
+
 
     // handles a new process on the system
     addRoute("newProcess", "PRC:NEW", handleNewProcess);
@@ -428,9 +466,6 @@ function ipcRedis(options){
 
       // handles a list of connections that we are expecting a callback from
       addRoute("callBackList", "PRC:"+core.uuid+":CBL", handleCallBackList);
-
-      // creates a new symbolic connection
-      addRoute("addSymbolicConnection", "PRC:"+core.uuid+":SYMNEW", handleNewSymbolicConnection);
 
       // creates a new symbolic connection
       addRoute("deleteSymbolicConnection", "PRC:"+core.uuid+":SYMDEL", handleDeleteSymbolicConnection);
@@ -464,7 +499,6 @@ function ipcRedis(options){
         addRoute: addRoute,
         removeRoute: removeRoute,
         publishToRoute: publishToRoute,
-        createSymbolicOnHost: createSymbolicOnHost,
         sendCallBackList: sendCallBackList,
         publish: publish,
         subscribe: subscribe,
@@ -473,11 +507,11 @@ function ipcRedis(options){
         unsubscribePattern: unsubscribePattern,
         routes: routes,
         store: redisClient,
-        process: process
+        process: process,
+        generateSymbolic: generateSymbolic
       },
 
-      main: {
-        createSymbolicOnHost: createSymbolicOnHost
+      main: {       
       },
 
       connectionInitialization: {

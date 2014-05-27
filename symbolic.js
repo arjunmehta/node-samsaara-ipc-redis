@@ -16,16 +16,15 @@ function initialize(samsaaraCore){
   ipc = samsaaraCore.ipc;
 }
 
-function SymbolicConnection(symbolicData){
-  this.id = symbolicData.nativeID;
+function SymbolicConnection(ownerID, connID, symbolicConnectionData){
+  this.id = connID;
   this.connectionClass = "symbolic";
-  this.owner = symbolicData.owner;
-  this.nativeID = symbolicData.nativeID;
-  this.connectionData = symbolicData.connectionData;
+  this.owner = ownerID;
+  this.connectionData = symbolicConnectionData;
 }
 
 SymbolicConnection.prototype.write = function(message){
-  debug(process.pid.toString(), "SYMBOLIC write on", "SYMBOLIC CONNECTION PUBLISHING: Owner:", this.owner, this.nativeID);
+  debug(process.pid.toString(), "SYMBOLIC write on", "SYMBOLIC CONNECTION PUBLISHING: Owner:", this.owner, this.nativeID);  
   ipc.publish("NTV:"+this.nativeID+":MSG", message);
 };
 
