@@ -139,14 +139,14 @@ function ipcRedis(options){
     var header = message.substring(0, index);
     var headerSplit = header.split(":");
 
-    var connMessage = message.slice(2+index-message.length);    
+    var connMessage = message.slice(2+index-message.length);
     var connID = headerSplit[headerSplit.indexOf("FRM")+1];
 
     var messageObj = parseJSON(connMessage);
 
     debug("Process Message", core.uuid, headerSplit, connID, messageObj);
 
-    if(messageObj !== undefined){
+    if(messageObj !== undefined && messageObj.func){
       communication.executeFunction({ connection: connections[connID] || {connection: {id: connID}} }, messageObj);
     }
   }
@@ -154,7 +154,7 @@ function ipcRedis(options){
   function splitHeaderMessage(rawmessage){
     var index = rawmessage.indexOf("::");
     var header = rawmessage.substring(0, index);
-    return [header.split(":"), rawmessage.slice(2+index-rawmessage.length)];
+    return { header: header.split(":"), message: rawmessage.slice(2+index-rawmessage.length)};
   }
 
 
@@ -376,9 +376,18 @@ function ipcRedis(options){
 
   // Message Router: Overwrites the core routeMessage method in the samsaara router
 
-  function ipcRouteMessage(connection, owner, newHeader, message){        
+  function ipcMessageRoute(connection, headerbits, message){
+
+    var owner = headerbits[1];
+
     if(owner === core.uuid){
-      router.processMessage(connection, message);
+
+      var messageObj = parseJSON(message);
+
+      if(messageObj !== undefined && messageObj.func !== undefined){
+        messageObj.sender = connection.id;
+        communication.executeFunction({connection: connection}, messageObj);
+      }
     }
     else{       
       sendClientMessageToProcess(owner, connection.id, message);
@@ -522,7 +531,7 @@ function ipcRedis(options){
         ipc: connectionClosing        
       },
 
-      routeMessageOverride: ipcRouteMessage
+      messageRoutes: {OWN: ipcMessageRoute}
 
     };
 
