@@ -33,6 +33,16 @@ function ipcRedis(options){
 
 
 
+  function use(middleware){
+    if(middleware.symbolicConnectionInitialization){
+      symbolic.initializationMethods.push(middleware.symbolicConnectionInitialization);
+    }
+    if(middleware.symbolicConnectionClosing){
+      symbolic.closingMethods.push(middleware.symbolicConnectionClosing);
+    }
+  }
+
+
   // Foundation Methods
 
   function addRoute(routeName, channel, func){
@@ -120,6 +130,7 @@ function ipcRedis(options){
   // ie. ipc.process(processID).execute()...
 
   function process(processUuid){
+    debugProcesses("Process Retrieval", processes, processUuid);
     return processes[processUuid];
   }
 
@@ -186,7 +197,7 @@ function ipcRedis(options){
   function generateSymbolic(connID, callBack){
 
     redisClient.hget("samsaara:connectionOwners", connID, function (err, ownerID){
-      if(err){
+      if(ownerID === null){
         if(typeof callBack === "function") callBack(err, null);
       }
       else{
@@ -453,7 +464,8 @@ function ipcRedis(options){
     router = samsaaraCore.router;
     connections = connectionController.connections;
 
-    SymbolicConnection = require('./symbolic').initialize(samsaaraCore);
+    symbolic = require('./symbolic');
+    SymbolicConnection = symbolic.initialize(samsaaraCore);
     Process = require('./process').initialize(samsaaraCore, processes, publish);
 
 
@@ -517,10 +529,16 @@ function ipcRedis(options){
         routes: routes,
         store: redisClient,
         process: process,
-        generateSymbolic: generateSymbolic
+        generateSymbolic: generateSymbolic,
+        use: use
       },
 
       main: {       
+      },
+
+      constructors : {
+        SymbolicConnection: SymbolicConnection,
+        Process: Process
       },
 
       connectionInitialization: {
