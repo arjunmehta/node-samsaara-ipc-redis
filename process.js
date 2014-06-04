@@ -54,6 +54,20 @@ Process.prototype.execute = function(){
 };
 
 
+Process.prototype.createSymbolic = function(connection, callBack){
+
+  this.execute("createSymbolic", connection.id, connection.connectionData, function (err){
+    if(!err){
+      connection.symbolicOwners[this.id] = true;
+      if(typeof callBack === "function") callBack(err);
+    }
+    else{
+      if(typeof callBack === "function") callBack(err);
+    }
+  });
+};
+
+
 
 module.exports = exports = {
   initialize: initialize,

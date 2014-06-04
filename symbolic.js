@@ -22,9 +22,6 @@ function initialize(samsaaraCore){
 }
 
 
-
-
-
 function SymbolicConnection(ownerID, connID, symbolicConnectionData){
   this.id = connID;
   this.connectionClass = "symbolic";
@@ -34,7 +31,6 @@ function SymbolicConnection(ownerID, connID, symbolicConnectionData){
   for(var i=0; i < initializationMethods.length; i++){
     initializationMethods[i](this);
   }
-
 }
 
 SymbolicConnection.prototype.write = function(message){
