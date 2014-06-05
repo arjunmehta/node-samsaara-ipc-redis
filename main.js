@@ -94,7 +94,7 @@ function initialize(samsaaraCore){
   connections = connectionController.connections;
 
   symbolic = require('./symbolic');
-  SymbolicConnection = symbolic.initialize(samsaaraCore);
+  SymbolicConnection = symbolic.initialize(samsaaraCore, publish);
   Process = require('./process').initialize(samsaaraCore, processes, publish);
 
   core.samsaara.createNamespace("interprocess", {
@@ -358,9 +358,9 @@ function requestDataForSymbolic(connID, processID, callBack){
 // called by another process, that creates a symbolic representation of a connection
 // with the supplied symbolicData on this process/machine.
 
-function createSymbolicConnection(connID, symbolicData, callBack){
+function createSymbolicConnection(connID, ownerID, symbolicData, callBack){
   if(!connections[connID]){
-    connections[connID] = new SymbolicConnection(ownerID, connID, symbolicConnectionData);      
+    connections[connID] = new SymbolicConnection(ownerID, connID, symbolicData);      
     if(typeof callBack === "function") callBack(null);
   }
   else{
@@ -405,7 +405,7 @@ function handleInterprocessExecute(channel, message){
   messageObj.ns = "interprocess";
   var executor = {id: messageObj.owner};
 
-  // debugProcesses("Handle New Execute", message, executor);
+  debugProcesses("Handle New Execute", message, executor);
 
   communication.executeFunction(executor, executor, messageObj, createIPCCallBack);
 }
