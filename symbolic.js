@@ -62,16 +62,6 @@ SymbolicConnection.prototype.execute = function(){
 };
 
 
-function executeOnConnection(connection, packet, args){
-
-  communication.processPacket(0, packet, args, function (incomingCallBack, packetReady){
-    if(incomingCallBack !== null){
-      incomingCallBack.addConnection(connection.id);
-    }
-    connection.write(packetReady); // will send directly or via symbolic
-  });
-}
-
 // Method to execute methods on the client.
 
 SymbolicConnection.prototype.executeRaw = function(packet, callback){
@@ -95,8 +85,41 @@ SymbolicConnection.prototype.executeRaw = function(packet, callback){
 
     connection.write( sendString );
   }
-
 };
+
+
+SymbolicConnection.prototype.write = function(message){
+  debug(process.pid.toString(), "SYMBOLIC write on", "SYMBOLIC CONNECTION PUBLISHING: Owner:", this.owner, this.id);  
+  publish("NTV:"+this.id+":MSG", message);
+};
+
+
+SymbolicConnection.prototype.updateDataAttribute = function(attributeName, value) {
+  this.connectionData[attributeName] = value;
+};
+
+
+SymbolicConnection.prototype.closeConnection = function(message){
+  var connID = this.id;
+  samsaara.emit("symbolicConnectionDisconnect", this);
+
+  for(var i=0; i < closingMethods.length; i++){
+    closingMethods[i](this);
+  }
+
+  delete connections[connID];
+};
+
+
+function executeOnConnection(connection, packet, args){
+
+  communication.processPacket(0, packet, args, function (incomingCallBack, packetReady){
+    if(incomingCallBack !== null){
+      incomingCallBack.addConnection(connection.id);
+    }
+    connection.write(packetReady); // will send directly or via symbolic
+  });
+}
 
 
 function processPacket(packet, args){
@@ -115,26 +138,6 @@ function processPacket(packet, args){
   return packet;
 }
 
-
-SymbolicConnection.prototype.write = function(message){
-  debug(process.pid.toString(), "SYMBOLIC write on", "SYMBOLIC CONNECTION PUBLISHING: Owner:", this.owner, this.id);  
-  publish("NTV:"+this.id+":MSG", message);
-};
-
-SymbolicConnection.prototype.updateDataAttribute = function(attributeName, value) {
-  this.connectionData[attributeName] = value;
-};
-
-SymbolicConnection.prototype.closeConnection = function(message){
-  var connID = this.id;
-  samsaara.emit("symbolicConnectionDisconnect", this);
-
-  for(var i=0; i < closingMethods.length; i++){
-    closingMethods[i](this);
-  }
-
-  delete connections[connID];
-};
 
 
 exports = module.exports = {
